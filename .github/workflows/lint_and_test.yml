@@ -1,0 +1,30 @@
+name: lint_and_test
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+
+    - name: Build
+      run: cargo build --all-targets --all-features
+
+    - name: Format
+      run: make fmt-check
+
+    - name: Clippy
+      run: make clippy
+
+    - name: Test
+      run: make test

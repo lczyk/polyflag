@@ -6,5 +6,26 @@ readme = "README.md"
 edition = "2024"
 license = "MIT"
 rust-version = "1.90"
+repository = "https://github.com/lczyk/polyflag"
+keywords = [
+    "cli",
+    "flags",
+    "args",
+    "parser",
+    "set",
+    #
+]
+categories = [
+    "command-line-interface",
+    "parsing",
+    #
+]
+exclude = [
+    ".github",
+    ".gitignore",
+    "makefile",
+    "VERSION",
+    #
+]
 
 [dependencies]
