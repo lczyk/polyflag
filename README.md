@@ -7,13 +7,17 @@ value is a comma-separated list of those names, accumulating into a
 `HashSet<&'static str>`. A `-` prefix on a token removes it from the set
 instead of adding. Unknown tokens error.
 
-Designed for flags like:
+Kitchensink example:
 
 ```
---quirks=foo,bar  --quirks=-foo  --quirks=baz
+set -x MY_APP_DEFAULT_QUIRKS=foo
+my-app --quirks=bar  --quirks=-foo  --quirks=baz
 ```
 
 where the final state is `{bar, baz}`.
+
+See `examples/demo.rs` for a runnable showcase (`cargo run --example demo`
+or `make demo`).
 
 ## Usage
 
@@ -110,6 +114,23 @@ without re-walking the table.
 table. The body is `#[cfg(debug_assertions)]`-gated, so release builds
 compile to a no-op -- callers may invoke it unconditionally at startup, and
 typos in the static table get caught by `cargo test` / dev builds.
+
+The `debug_check_known!(KNOWN)` macro is a one-liner wrapper around
+`check_known` for call sites that prefer the `debug_assert!`-shaped form;
+identical runtime semantics.
+
+### Rendering the table for help / error output
+
+`format_known_for_help(known)` produces a comma-separated string of
+canonicals with non-`Hidden` aliases parenthesised, suitable for embedding
+in `--help` text or `unknown quirk X; known: ...` error messages:
+
+```rust
+// "foo, bar (barre), baz (baz-alt, old-baz)"
+let listing = polyflag::format_known_for_help(KNOWN);
+```
+
+`Hidden` aliases are omitted (that's the point of `Hidden`).
 
 ### Env-var defaults
 
