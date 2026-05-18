@@ -332,6 +332,69 @@ pub fn check_known(known: &[KnownToken]) {
     }
 }
 
+/// Render the known-token table as a comma-separated string suitable for
+/// embedding in help text or error messages. Canonicals are joined with
+/// `", "`; non-[`AliasStatus::Hidden`] aliases for each canonical are listed
+/// parenthetically. `Hidden` aliases are omitted (that's their point).
+///
+/// Example output: `"foo, bar (barre), baz (baz-alt, old-baz)"`.
+///
+/// ```
+/// use polyflag::{KnownToken, format_known_for_help, token};
+///
+/// const KNOWN: &[KnownToken] = &[
+///     token!("foo"),
+///     token!("bar"; "barre"),
+///     token!("baz"; "baz-alt", deprecated "old-baz", hidden "b"),
+/// ];
+/// assert_eq!(
+///     format_known_for_help(KNOWN),
+///     "foo, bar (barre), baz (baz-alt, old-baz)",
+/// );
+/// ```
+pub fn format_known_for_help(known: &[KnownToken]) -> String {
+    let mut out = String::new();
+    for kt in known {
+        if !out.is_empty() {
+            out.push_str(", ");
+        }
+        out.push_str(kt.canonical);
+        let mut first_alt = true;
+        for alias in kt.aliases {
+            if matches!(
+                alias.status,
+                AliasStatus::Alternative | AliasStatus::Deprecated
+            ) {
+                out.push_str(if first_alt { " (" } else { ", " });
+                out.push_str(alias.spelling);
+                first_alt = false;
+            }
+        }
+        if !first_alt {
+            out.push(')');
+        }
+    }
+    out
+}
+
+/// Wrap [`check_known`] in a `debug_assert!`-shaped call site. Identical
+/// runtime semantics to calling `check_known` directly (both are stripped
+/// in release), but makes intent unambiguous at the call site:
+///
+/// ```
+/// use polyflag::{KnownToken, debug_check_known, token};
+///
+/// const KNOWN: &[KnownToken] = &[token!("foo"), token!("bar"; "barre")];
+/// debug_check_known!(KNOWN);
+/// ```
+#[macro_export]
+macro_rules! debug_check_known {
+    ($known:expr) => {
+        #[cfg(debug_assertions)]
+        $crate::check_known($known);
+    };
+}
+
 /// Construct a [`KnownToken`] tersely.
 ///
 /// Forms:
@@ -649,5 +712,95 @@ mod tests {
             apply_env_for_flag("polytest", "allow-create", KNOWN, &mut set).unwrap();
             assert_eq!(set, HashSet::from(["foo"]));
         });
+    }
+
+    #[test]
+    fn whitespace_around_tokens_trimmed() {
+        let s = run(&[" foo , bar ", "\tbaz\t"]).unwrap();
+        assert_eq!(s, HashSet::from(["foo", "bar", "baz"]));
+    }
+
+    #[test]
+    fn trailing_and_double_commas_skipped() {
+        let s = run(&["foo,,bar,"]).unwrap();
+        assert_eq!(s, HashSet::from(["foo", "bar"]));
+    }
+
+    #[test]
+    fn deprecated_callback_fires_per_occurrence() {
+        let mut set: HashSet<&'static str> = HashSet::new();
+        let mut hits: Vec<(String, &'static str)> = Vec::new();
+        apply_with_callback("old-baz,foo,old-baz", KNOWN, &mut set, |s, c| {
+            hits.push((s.to_owned(), c));
+        })
+        .unwrap();
+        assert_eq!(
+            hits,
+            vec![("old-baz".to_owned(), "baz"), ("old-baz".to_owned(), "baz"),]
+        );
+    }
+
+    #[test]
+    fn unknown_token_leaves_set_partial() {
+        let mut set: HashSet<&'static str> = HashSet::new();
+        let err = apply("foo,bar,nope,baz", KNOWN, &mut set).unwrap_err();
+        assert_eq!(err.0, "nope");
+        // tokens before the failing one stay; tokens after never applied.
+        assert_eq!(set, HashSet::from(["foo", "bar"]));
+    }
+
+    #[test]
+    fn bare_dash_errors_as_empty_unknown() {
+        let mut set: HashSet<&'static str> = HashSet::new();
+        let err = apply("-", KNOWN, &mut set).unwrap_err();
+        assert_eq!(err.0, "");
+    }
+
+    #[test]
+    fn double_dash_prefix_strips_one_only() {
+        // `--foo` strips one `-` -> looks up `-foo`, which is not a known
+        // token spelling (check_known forbids embedding `-` in canonicals
+        // only by convention; here it's just not registered).
+        let mut set: HashSet<&'static str> = HashSet::new();
+        let err = apply("--foo", KNOWN, &mut set).unwrap_err();
+        assert_eq!(err.0, "-foo");
+    }
+
+    #[test]
+    fn format_known_for_help_renders_canonicals_and_visible_aliases() {
+        assert_eq!(
+            format_known_for_help(KNOWN),
+            "foo, bar (barre), baz (baz-alt, old-baz)",
+        );
+    }
+
+    #[test]
+    fn format_known_for_help_empty_table_is_empty_string() {
+        assert_eq!(format_known_for_help(&[]), "");
+    }
+
+    #[test]
+    fn format_known_for_help_canonical_only_no_parens() {
+        const ONLY_CANONICAL: &[KnownToken] = &[token!("a"), token!("b")];
+        assert_eq!(format_known_for_help(ONLY_CANONICAL), "a, b");
+    }
+
+    #[test]
+    fn format_known_for_help_hidden_only_no_parens() {
+        const HIDDEN_ONLY: &[KnownToken] = &[token!("x"; hidden "h1", hidden "h2")];
+        assert_eq!(format_known_for_help(HIDDEN_ONLY), "x");
+    }
+
+    #[test]
+    fn debug_check_known_macro_accepts_valid_table() {
+        debug_check_known!(KNOWN);
+    }
+
+    #[test]
+    fn env_var_name_prefix_kebab_not_converted() {
+        // Pinned behavior: only `flag` rewrites `-` -> `_`; `prefix` is
+        // uppercased verbatim. Callers should pass an already-screaming-
+        // snake prefix.
+        assert_eq!(env_var_name("my-app", "quirks"), "MY-APP_QUIRKS");
     }
 }
