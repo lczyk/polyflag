@@ -59,20 +59,28 @@ impl fmt::Display for UnknownToken {
 impl std::error::Error for UnknownToken {}
 
 /// One entry in the caller's known-token table: a canonical spelling plus
-/// zero or more aliases that resolve to it.
+/// zero or more aliases that resolve to it, and an optional `default`
+/// marker for tokens that should be in the set before any cli/env input.
 #[derive(Debug, Clone, Copy)]
 pub struct KnownToken {
     pub canonical: &'static str,
     pub aliases: &'static [Alias],
+    /// If `true`, [`defaults`] includes this canonical in the seed set.
+    /// Lets the table double as both the schema and the on-by-default
+    /// policy, with one source of truth. Use the `default` prefix in
+    /// [`token!`] (e.g. `token!(default "color")`).
+    pub default: bool,
 }
 
 impl KnownToken {
-    /// Construct a token with no aliases. The [`token!`] macro is more
-    /// ergonomic at call sites; this is the bare ctor.
+    /// Construct a token with no aliases and `default = false`. The
+    /// [`token!`] macro is more ergonomic at call sites; this is the bare
+    /// ctor.
     pub const fn new(canonical: &'static str) -> Self {
         Self {
             canonical,
             aliases: &[],
+            default: false,
         }
     }
 }
@@ -306,6 +314,12 @@ pub fn check_known(known: &[KnownToken]) {
                 "empty canonical spelling in known-token list"
             );
             assert!(
+                !kt.canonical.starts_with('-'),
+                "canonical {:?} starts with '-'; would be unreachable b/c \
+                 input '-name' is parsed as a remove of 'name'",
+                kt.canonical,
+            );
+            assert!(
                 !seen.contains(&kt.canonical),
                 "duplicate spelling {:?} in known-token list (canonical collides)",
                 kt.canonical,
@@ -316,6 +330,12 @@ pub fn check_known(known: &[KnownToken]) {
                     !alias.spelling.is_empty(),
                     "empty alias spelling for canonical {:?}",
                     kt.canonical,
+                );
+                assert!(
+                    !alias.spelling.starts_with('-'),
+                    "alias {:?} starts with '-'; would be unreachable b/c \
+                     input '-name' is parsed as a remove of 'name'",
+                    alias.spelling,
                 );
                 assert!(
                     !seen.contains(&alias.spelling),
@@ -377,6 +397,38 @@ pub fn format_known_for_help(known: &[KnownToken]) -> String {
     out
 }
 
+/// Seed a fresh [`HashSet`] with the canonicals of every [`KnownToken`]
+/// marked `default = true`. Use as the starting set before applying any
+/// env-var or cli occurrences, so the caller's table doubles as both the
+/// schema and the on-by-default policy.
+///
+/// The convention this enables: name tokens as positive switches for
+/// on-by-default booleans (`color`, `animations`, `cookies`) and mark them
+/// `default`; users then disable with `--quirks=-color` and the table
+/// alone tells you the starting state.
+///
+/// ```
+/// use polyflag::{KnownToken, apply, defaults, token};
+///
+/// const KNOWN: &[KnownToken] = &[
+///     token!(default "color"),
+///     token!(default "cookies"),
+///     token!("glitter"),
+/// ];
+///
+/// let mut set = defaults(KNOWN);
+/// apply("-color,glitter", KNOWN, &mut set).unwrap();
+/// assert!(set.contains("cookies") && set.contains("glitter"));
+/// assert!(!set.contains("color"));
+/// ```
+pub fn defaults(known: &[KnownToken]) -> HashSet<&'static str> {
+    known
+        .iter()
+        .filter(|kt| kt.default)
+        .map(|kt| kt.canonical)
+        .collect()
+}
+
 /// Wrap [`check_known`] in a `debug_assert!`-shaped call site. Identical
 /// runtime semantics to calling `check_known` directly (both are stripped
 /// in release), but makes intent unambiguous at the call site:
@@ -403,20 +455,35 @@ macro_rules! debug_check_known {
 /// token!("canonical")
 /// token!("canonical"; "alt1", "alt2")
 /// token!("canonical"; "alt", deprecated "old", hidden "internal")
+/// token!(default "canonical")
+/// token!(default "canonical"; "alt", hidden "internal")
 /// ```
 ///
 /// Bare string literals after `;` become [`AliasStatus::Alternative`].
 /// `deprecated <literal>` and `hidden <literal>` produce the corresponding
-/// [`AliasStatus`]. Mixing forms in one invocation is allowed.
+/// [`AliasStatus`]. Mixing forms in one invocation is allowed. The
+/// optional `default` prefix marks the canonical as on-by-default (see
+/// [`defaults`]).
 #[macro_export]
 macro_rules! token {
+    (default $canon:literal) => {
+        $crate::KnownToken { canonical: $canon, aliases: &[], default: true }
+    };
+    (default $canon:literal; $($rest:tt)+) => {
+        $crate::KnownToken {
+            canonical: $canon,
+            aliases: &$crate::__token_aliases!([] , $($rest)+),
+            default: true,
+        }
+    };
     ($canon:literal) => {
-        $crate::KnownToken { canonical: $canon, aliases: &[] }
+        $crate::KnownToken { canonical: $canon, aliases: &[], default: false }
     };
     ($canon:literal; $($rest:tt)+) => {
         $crate::KnownToken {
             canonical: $canon,
             aliases: &$crate::__token_aliases!([] , $($rest)+),
+            default: false,
         }
     };
 }
@@ -627,6 +694,20 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "starts with '-'")]
+    fn check_known_rejects_dash_prefix_canonical() {
+        const BAD: &[KnownToken] = &[token!("-color")];
+        check_known(BAD);
+    }
+
+    #[test]
+    #[should_panic(expected = "starts with '-'")]
+    fn check_known_rejects_dash_prefix_alias() {
+        const BAD: &[KnownToken] = &[token!("color"; "-colour")];
+        check_known(BAD);
+    }
+
+    #[test]
     #[should_panic(expected = "empty alias")]
     fn check_known_rejects_empty_alias() {
         const BAD: &[KnownToken] = &[token!("foo"; "")];
@@ -789,6 +870,47 @@ mod tests {
     fn format_known_for_help_hidden_only_no_parens() {
         const HIDDEN_ONLY: &[KnownToken] = &[token!("x"; hidden "h1", hidden "h2")];
         assert_eq!(format_known_for_help(HIDDEN_ONLY), "x");
+    }
+
+    #[test]
+    fn defaults_empty_when_no_default_marked() {
+        assert_eq!(defaults(KNOWN), HashSet::new());
+    }
+
+    #[test]
+    fn defaults_collects_only_marked_canonicals() {
+        const DEFAULTED: &[KnownToken] = &[
+            token!(default "color"),
+            token!(default "cookies"; "cookie"),
+            token!("glitter"),
+            token!("animations"; hidden "anim"),
+        ];
+        assert_eq!(defaults(DEFAULTED), HashSet::from(["color", "cookies"]));
+    }
+
+    #[test]
+    fn defaults_layer_with_apply_negation() {
+        const DEFAULTED: &[KnownToken] = &[
+            token!(default "color"),
+            token!(default "cookies"),
+            token!("glitter"),
+        ];
+        let mut set = defaults(DEFAULTED);
+        apply("-color,glitter", DEFAULTED, &mut set).unwrap();
+        assert_eq!(set, HashSet::from(["cookies", "glitter"]));
+    }
+
+    #[test]
+    fn default_marker_does_not_affect_resolution() {
+        const DEFAULTED: &[KnownToken] = &[token!(default "color"; "colour")];
+        // Resolution / aliasing untouched by default marker.
+        assert_eq!(
+            canonicalize("colour", DEFAULTED),
+            Some(Resolved {
+                canonical: "color",
+                kind: ResolvedKind::Alternative,
+            })
+        );
     }
 
     #[test]

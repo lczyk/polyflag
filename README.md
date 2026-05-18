@@ -138,6 +138,33 @@ let listing = polyflag::format_known_for_help(KNOWN);
 
 `Hidden` aliases are omitted (that's the point of `Hidden`).
 
+### On-by-default tokens
+
+Mark canonicals with the `default` prefix in `token!` and seed the working
+set with `defaults(known)`. The table doubles as both the schema and the
+on-by-default policy -- one source of truth.
+
+```rust
+use polyflag::{KnownToken, apply, defaults, token};
+
+const KNOWN: &[KnownToken] = &[
+    token!(default "color"),
+    token!(default "cookies"),
+    token!("glitter"),
+];
+
+let mut set = defaults(KNOWN);
+apply("-color,glitter", KNOWN, &mut set).unwrap();
+assert!(set.contains("cookies") && set.contains("glitter"));
+assert!(!set.contains("color"));
+```
+
+This pairs naturally with the recc convention of naming tokens as positive
+switches for on-by-default booleans (`color`, `animations`, `cookies`)
+rather than `nocolor`-style negations. Users then disable with the `-`
+prefix (`--quirks=-color`) and the table alone tells you the starting
+state.
+
 ### Env-var defaults
 
 `apply_env_for_flag(prefix, flag, known, set)` reads an env var derived from
