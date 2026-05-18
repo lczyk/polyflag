@@ -1,5 +1,11 @@
 # polyflag
 
+![Crates.io MSRV](https://img.shields.io/crates/msrv/polyflag)
+![Crates.io Version](https://img.shields.io/crates/v/polyflag)
+[![lint_and_test](https://github.com/lczyk/polyflag/actions/workflows/lint_and_test.yml/badge.svg)](https://github.com/lczyk/polyflag/actions/workflows/lint_and_test.yml)
+[![docs.rs](https://img.shields.io/docsrs/polyflag)](https://docs.rs/polyflag)
+![Crates.io License](https://img.shields.io/crates/l/polyflag)
+
 Repeatable comma-separated set-style cli flags with `-` prefix removal.
 
 Given a fixed list of known token names, parse one occurrence of a flag whose
