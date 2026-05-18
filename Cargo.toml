@@ -1,6 +1,6 @@
 [package]
 name = "polyflag"
-version = "0.2.0"  # source: /VERSION (synced by `make sync-version`; do not edit by hand)
+version = "0.3.0"  # source: /VERSION (synced by `make sync-version`; do not edit by hand)
 description = "Repeatable comma-separated set-style cli flags with `-` prefix removal."
 readme = "README.md"
 edition = "2024"
