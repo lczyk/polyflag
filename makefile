@@ -51,6 +51,10 @@ cover:  ## Coverage profile + HTML file (cover.out, cover.html)
 cover-open: cover  ## Run coverage and open the HTML report in a browser
 	cargo llvm-cov --all-features --html --open
 
+.PHONY: demo
+demo:  ## Run the demo example (cargo run --example demo)
+	cargo run --example demo
+
 .PHONY: clean
 clean:  ## Remove the target/ directory
 	cargo clean
