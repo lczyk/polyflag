@@ -70,17 +70,24 @@ pub struct KnownToken {
     /// policy, with one source of truth. Use the `default` prefix in
     /// [`token!`] (e.g. `token!(default "color")`).
     pub default: bool,
+    /// If `true`, [`check_known`] skips the charset check for this entry's
+    /// canonical and aliases. By default, names must match `[A-Za-z0-9_-]+`
+    /// and not start with `-` or `+` (which are reserved as remove / add
+    /// prefixes). Set via `token!(weird ...)` for names that need other
+    /// characters (e.g. `.`, `:`, `/`).
+    pub allow_weird: bool,
 }
 
 impl KnownToken {
-    /// Construct a token with no aliases and `default = false`. The
-    /// [`token!`] macro is more ergonomic at call sites; this is the bare
-    /// ctor.
+    /// Construct a token with no aliases, `default = false`, and
+    /// `allow_weird = false`. The [`token!`] macro is more ergonomic at
+    /// call sites; this is the bare ctor.
     pub const fn new(canonical: &'static str) -> Self {
         Self {
             canonical,
             aliases: &[],
             default: false,
+            allow_weird: false,
         }
     }
 }
@@ -175,7 +182,9 @@ pub fn canonicalize(input: &str, known: &[KnownToken]) -> Option<Resolved> {
 ///
 /// `input` is the raw value (everything after `=` in `--flag=...`). It is
 /// split on `,`; tokens are trimmed; empty tokens are skipped. A `-` prefix
-/// on a token removes the named entry; otherwise the entry is inserted.
+/// on a token removes the named entry; a `+` prefix explicitly adds (same
+/// as no prefix, provided for parity with `-`); otherwise the entry is
+/// inserted.
 /// Inserted / removed values are always the **canonical** `&'static str`
 /// from `known`, regardless of which alias the input used.
 ///
@@ -206,7 +215,7 @@ pub fn apply_with_callback(
     for tok in input.split(',').map(str::trim).filter(|s| !s.is_empty()) {
         let (name, add) = match tok.strip_prefix('-') {
             Some(rest) => (rest, false),
-            None => (tok, true),
+            None => (tok.strip_prefix('+').unwrap_or(tok), true),
         };
         let Some(resolved) = canonicalize(name, known) else {
             return Err(UnknownToken(name.to_owned()));
@@ -304,6 +313,10 @@ pub fn env_var_name(prefix: &str, flag: &str) -> String {
 /// The intent is to catch typos in the static token table at test time;
 /// callers that ship `cargo test` before release will get the assertions
 /// for free.
+fn is_default_token_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '-' || c == '_'
+}
+
 pub fn check_known(known: &[KnownToken]) {
     #[cfg(debug_assertions)]
     {
@@ -319,6 +332,20 @@ pub fn check_known(known: &[KnownToken]) {
                  input '-name' is parsed as a remove of 'name'",
                 kt.canonical,
             );
+            assert!(
+                !kt.canonical.starts_with('+'),
+                "canonical {:?} starts with '+'; would be unreachable b/c \
+                 input '+name' is parsed as an add of 'name'",
+                kt.canonical,
+            );
+            if !kt.allow_weird {
+                assert!(
+                    kt.canonical.chars().all(is_default_token_char),
+                    "canonical {:?} contains characters outside default \
+                     set [A-Za-z0-9_-]; use `token!(weird ...)` to opt in",
+                    kt.canonical,
+                );
+            }
             assert!(
                 !seen.contains(&kt.canonical),
                 "duplicate spelling {:?} in known-token list (canonical collides)",
@@ -337,6 +364,20 @@ pub fn check_known(known: &[KnownToken]) {
                      input '-name' is parsed as a remove of 'name'",
                     alias.spelling,
                 );
+                assert!(
+                    !alias.spelling.starts_with('+'),
+                    "alias {:?} starts with '+'; would be unreachable b/c \
+                     input '+name' is parsed as an add of 'name'",
+                    alias.spelling,
+                );
+                if !kt.allow_weird {
+                    assert!(
+                        alias.spelling.chars().all(is_default_token_char),
+                        "alias {:?} contains characters outside default \
+                         set [A-Za-z0-9_-]; use `token!(weird ...)` to opt in",
+                        alias.spelling,
+                    );
+                }
                 assert!(
                     !seen.contains(&alias.spelling),
                     "duplicate spelling {:?} in known-token list (alias collides)",
@@ -457,6 +498,8 @@ macro_rules! debug_check_known {
 /// token!("canonical"; "alt", deprecated "old", hidden "internal")
 /// token!(default "canonical")
 /// token!(default "canonical"; "alt", hidden "internal")
+/// token!(weird "weird.name")
+/// token!(weird default "weird.name"; "alt")
 /// ```
 ///
 /// Bare string literals after `;` become [`AliasStatus::Alternative`].
@@ -466,24 +509,48 @@ macro_rules! debug_check_known {
 /// [`defaults`]).
 #[macro_export]
 macro_rules! token {
+    (weird default $canon:literal) => {
+        $crate::KnownToken { canonical: $canon, aliases: &[], default: true, allow_weird: true }
+    };
+    (weird default $canon:literal; $($rest:tt)+) => {
+        $crate::KnownToken {
+            canonical: $canon,
+            aliases: &$crate::__token_aliases!([] , $($rest)+),
+            default: true,
+            allow_weird: true,
+        }
+    };
+    (weird $canon:literal) => {
+        $crate::KnownToken { canonical: $canon, aliases: &[], default: false, allow_weird: true }
+    };
+    (weird $canon:literal; $($rest:tt)+) => {
+        $crate::KnownToken {
+            canonical: $canon,
+            aliases: &$crate::__token_aliases!([] , $($rest)+),
+            default: false,
+            allow_weird: true,
+        }
+    };
     (default $canon:literal) => {
-        $crate::KnownToken { canonical: $canon, aliases: &[], default: true }
+        $crate::KnownToken { canonical: $canon, aliases: &[], default: true, allow_weird: false }
     };
     (default $canon:literal; $($rest:tt)+) => {
         $crate::KnownToken {
             canonical: $canon,
             aliases: &$crate::__token_aliases!([] , $($rest)+),
             default: true,
+            allow_weird: false,
         }
     };
     ($canon:literal) => {
-        $crate::KnownToken { canonical: $canon, aliases: &[], default: false }
+        $crate::KnownToken { canonical: $canon, aliases: &[], default: false, allow_weird: false }
     };
     ($canon:literal; $($rest:tt)+) => {
         $crate::KnownToken {
             canonical: $canon,
             aliases: &$crate::__token_aliases!([] , $($rest)+),
             default: false,
+            allow_weird: false,
         }
     };
 }
@@ -828,6 +895,94 @@ mod tests {
         assert_eq!(err.0, "nope");
         // tokens before the failing one stay; tokens after never applied.
         assert_eq!(set, HashSet::from(["foo", "bar"]));
+    }
+
+    #[test]
+    fn plus_prefix_adds_like_bare() {
+        let s = run(&["+foo,+bar"]).unwrap();
+        assert_eq!(s, HashSet::from(["foo", "bar"]));
+    }
+
+    #[test]
+    fn plus_prefix_via_alias_resolves_to_canonical() {
+        let s = run(&["+barre"]).unwrap();
+        assert_eq!(s, HashSet::from(["bar"]));
+    }
+
+    #[test]
+    fn plus_and_minus_mixed() {
+        let s = run(&["+foo,bar", "-foo,+baz"]).unwrap();
+        assert_eq!(s, HashSet::from(["bar", "baz"]));
+    }
+
+    #[test]
+    fn bare_plus_errors_as_empty_unknown() {
+        let mut set: HashSet<&'static str> = HashSet::new();
+        let err = apply("+", KNOWN, &mut set).unwrap_err();
+        assert_eq!(err.0, "");
+    }
+
+    #[test]
+    #[should_panic(expected = "starts with '+'")]
+    fn check_known_rejects_plus_prefix_canonical() {
+        const BAD: &[KnownToken] = &[token!("+color")];
+        check_known(BAD);
+    }
+
+    #[test]
+    #[should_panic(expected = "outside default set")]
+    fn check_known_rejects_dot_in_canonical() {
+        const BAD: &[KnownToken] = &[token!("foo.bar")];
+        check_known(BAD);
+    }
+
+    #[test]
+    #[should_panic(expected = "outside default set")]
+    fn check_known_rejects_dot_in_alias() {
+        const BAD: &[KnownToken] = &[token!("foo"; "f.b")];
+        check_known(BAD);
+    }
+
+    #[test]
+    fn check_known_allows_underscore_and_digits_and_dash_mid() {
+        const OK: &[KnownToken] = &[token!("foo_bar"), token!("a-b"), token!("v2")];
+        check_known(OK);
+    }
+
+    #[test]
+    fn check_known_weird_bypasses_charset() {
+        const OK: &[KnownToken] = &[token!(weird "foo.bar"; "x/y", "a:b")];
+        check_known(OK);
+    }
+
+    #[test]
+    fn weird_still_rejects_dash_prefix() {
+        // dash/plus prefix bans are not bypassed by `weird`.
+        let kt = KnownToken {
+            canonical: "-foo",
+            aliases: &[],
+            default: false,
+            allow_weird: true,
+        };
+        let r = std::panic::catch_unwind(|| check_known(&[kt]));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn weird_token_resolves_normally() {
+        const KW: &[KnownToken] = &[token!(weird "a.b"), token!(weird "c/d")];
+        let mut set: HashSet<&'static str> = HashSet::new();
+        apply("a.b,c/d", KW, &mut set).unwrap();
+        assert_eq!(set, HashSet::from(["a.b", "c/d"]));
+        apply("-a.b", KW, &mut set).unwrap();
+        assert_eq!(set, HashSet::from(["c/d"]));
+    }
+
+    #[test]
+    #[should_panic(expected = "starts with '+'")]
+    fn check_known_rejects_plus_prefix_alias() {
+        const BAD: &[KnownToken] = &[token!("color"; "+colour")];
+        check_known(BAD);
     }
 
     #[test]
