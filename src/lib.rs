@@ -70,7 +70,10 @@ impl KnownToken {
     /// Construct a token with no aliases. The [`token!`] macro is more
     /// ergonomic at call sites; this is the bare ctor.
     pub const fn new(canonical: &'static str) -> Self {
-        Self { canonical, aliases: &[] }
+        Self {
+            canonical,
+            aliases: &[],
+        }
     }
 }
 
@@ -83,13 +86,22 @@ pub struct Alias {
 
 impl Alias {
     pub const fn alt(spelling: &'static str) -> Self {
-        Self { spelling, status: AliasStatus::Alternative }
+        Self {
+            spelling,
+            status: AliasStatus::Alternative,
+        }
     }
     pub const fn deprecated(spelling: &'static str) -> Self {
-        Self { spelling, status: AliasStatus::Deprecated }
+        Self {
+            spelling,
+            status: AliasStatus::Deprecated,
+        }
     }
     pub const fn hidden(spelling: &'static str) -> Self {
-        Self { spelling, status: AliasStatus::Hidden }
+        Self {
+            spelling,
+            status: AliasStatus::Hidden,
+        }
     }
 }
 
@@ -129,7 +141,10 @@ pub enum ResolvedKind {
 pub fn canonicalize(input: &str, known: &[KnownToken]) -> Option<Resolved> {
     for kt in known {
         if kt.canonical == input {
-            return Some(Resolved { canonical: kt.canonical, kind: ResolvedKind::Canonical });
+            return Some(Resolved {
+                canonical: kt.canonical,
+                kind: ResolvedKind::Canonical,
+            });
         }
         for alias in kt.aliases {
             if alias.spelling == input {
@@ -138,7 +153,10 @@ pub fn canonicalize(input: &str, known: &[KnownToken]) -> Option<Resolved> {
                     AliasStatus::Deprecated => ResolvedKind::Deprecated,
                     AliasStatus::Hidden => ResolvedKind::Hidden,
                 };
-                return Some(Resolved { canonical: kt.canonical, kind });
+                return Some(Resolved {
+                    canonical: kt.canonical,
+                    kind,
+                });
             }
         }
     }
@@ -243,7 +261,9 @@ pub fn apply_env_for_flag_with_callback(
     on_deprecated: impl FnMut(&str, &'static str),
 ) -> Result<(), UnknownToken> {
     let env_var = env_var_name(prefix, flag);
-    let Ok(val) = std::env::var(&env_var) else { return Ok(()) };
+    let Ok(val) = std::env::var(&env_var) else {
+        return Ok(());
+    };
     apply_with_callback(&val, known, set, on_deprecated)
 }
 
@@ -257,7 +277,11 @@ pub fn env_var_name(prefix: &str, flag: &str) -> String {
     }
     out.push('_');
     for c in flag.chars() {
-        out.push(if c == '-' { '_' } else { c.to_ascii_uppercase() });
+        out.push(if c == '-' {
+            '_'
+        } else {
+            c.to_ascii_uppercase()
+        });
     }
     out
 }
@@ -277,7 +301,10 @@ pub fn check_known(known: &[KnownToken]) {
     {
         let mut seen: Vec<&'static str> = Vec::new();
         for kt in known {
-            assert!(!kt.canonical.is_empty(), "empty canonical spelling in known-token list");
+            assert!(
+                !kt.canonical.is_empty(),
+                "empty canonical spelling in known-token list"
+            );
             assert!(
                 !seen.contains(&kt.canonical),
                 "duplicate spelling {:?} in known-token list (canonical collides)",
@@ -446,19 +473,31 @@ mod tests {
     fn canonicalize_classifies_match_kind() {
         assert_eq!(
             canonicalize("foo", KNOWN),
-            Some(Resolved { canonical: "foo", kind: ResolvedKind::Canonical })
+            Some(Resolved {
+                canonical: "foo",
+                kind: ResolvedKind::Canonical
+            })
         );
         assert_eq!(
             canonicalize("barre", KNOWN),
-            Some(Resolved { canonical: "bar", kind: ResolvedKind::Alternative })
+            Some(Resolved {
+                canonical: "bar",
+                kind: ResolvedKind::Alternative
+            })
         );
         assert_eq!(
             canonicalize("old-baz", KNOWN),
-            Some(Resolved { canonical: "baz", kind: ResolvedKind::Deprecated })
+            Some(Resolved {
+                canonical: "baz",
+                kind: ResolvedKind::Deprecated
+            })
         );
         assert_eq!(
             canonicalize("b", KNOWN),
-            Some(Resolved { canonical: "baz", kind: ResolvedKind::Hidden })
+            Some(Resolved {
+                canonical: "baz",
+                kind: ResolvedKind::Hidden
+            })
         );
         assert_eq!(canonicalize("nope", KNOWN), None);
     }
