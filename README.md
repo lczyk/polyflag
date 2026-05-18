@@ -211,3 +211,7 @@ hyphen-tokens -- e.g. clap's `allow_hyphen_values(true)`.
   config file). A `String`-keyed variant could be added if needed.
 - **No clap adapter.** A separate `polyflag-clap` crate could wrap this
   as a clap `value_parser`. Out of scope for this crate.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
