@@ -51,6 +51,10 @@ cover:  ## Coverage profile + HTML file (cover.out, cover.html)
 cover-open: cover  ## Run coverage and open the HTML report in a browser
 	cargo llvm-cov --all-features --html --open
 
+.PHONY: list-crate
+list-crate:  ## List files that would be packaged into the crates.io tarball
+	cargo package --list --allow-dirty
+
 .PHONY: demo
 demo:  ## Run the demo example (cargo run --example demo)
 	cargo run --example demo

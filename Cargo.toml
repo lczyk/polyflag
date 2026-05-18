@@ -24,6 +24,7 @@ exclude = [
     ".github",
     ".gitignore",
     "makefile",
+    "Makefile",
     "VERSION",
     #
 ]
